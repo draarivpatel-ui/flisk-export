@@ -262,6 +262,127 @@ describe("flisk-export render", () => {
     expect(result.stdout + result.stderr).not.toContain(SECRET);
   });
 
+  it("exports Bun backend with bun commands and BUN_VERSION env var", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flisk-export-bun-"));
+    writeFiles(root, {
+      ".flisk/project.json": "{}",
+      "services/main/api/service.json": service({
+        appName: "api",
+        appType: "backend",
+        port: 4000,
+        healthCheckPath: "/health",
+      }),
+      "services/main/api/package.json": JSON.stringify({
+        scripts: {
+          build: "tsc",
+          start: "bun run dist/index.js",
+        },
+      }),
+    });
+    const result = await run(["render"], root);
+    expect(result.status).toBe(0);
+    const yaml = fs.readFileSync(path.join(root, "render.yaml"), "utf-8");
+    expect(yaml).toContain(
+      [
+        "services:",
+        "  - type: web",
+        '    name: "api"',
+        "    runtime: node",
+        '    rootDir: "services/main/api"',
+        '    buildCommand: "bun install && bun run build"',
+        '    startCommand: "bun run start"',
+        '    healthCheckPath: "/health"',
+        "    envVars:",
+        "      - key: BUN_VERSION",
+        '        value: "1.3"',
+        "      - key: PORT",
+        '        value: "4000"',
+      ].join("\n"),
+    );
+  });
+
+  it("reads BUN_VERSION from packageManager or engines.bun when present", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flisk-export-bun-ver-"));
+    writeFiles(root, {
+      ".flisk/project.json": "{}",
+      "services/pkgmgr/service.json": service({
+        appName: "pkgmgr",
+        appType: "backend",
+        port: 4001,
+      }),
+      "services/pkgmgr/package.json": JSON.stringify({
+        packageManager: "bun@1.2.4",
+        scripts: { start: "bun run src/index.ts" },
+      }),
+      "services/engine/service.json": service({
+        appName: "engine",
+        appType: "backend",
+        port: 4002,
+      }),
+      "services/engine/package.json": JSON.stringify({
+        engines: { bun: ">=1.1.0" },
+        scripts: { start: "bun run src/index.ts" },
+      }),
+      "services/locked/service.json": service({
+        appName: "locked",
+        appType: "backend",
+        port: 4003,
+      }),
+      "services/locked/package.json": JSON.stringify({
+        scripts: { start: "node server.js" },
+      }),
+      "services/locked/bun.lock": "",
+    });
+    const result = await run(["render"], root);
+    expect(result.status).toBe(0);
+    const yaml = fs.readFileSync(path.join(root, "render.yaml"), "utf-8");
+    expect(yaml).toContain(
+      [
+        '    name: "pkgmgr"',
+        "    runtime: node",
+        '    rootDir: "services/pkgmgr"',
+        '    buildCommand: "bun install"',
+        '    startCommand: "bun run start"',
+        '    healthCheckPath: "/health"',
+        "    envVars:",
+        "      - key: BUN_VERSION",
+        '        value: "1.2.4"',
+        "      - key: PORT",
+        '        value: "4001"',
+      ].join("\n"),
+    );
+    expect(yaml).toContain(
+      [
+        '    name: "engine"',
+        "    runtime: node",
+        '    rootDir: "services/engine"',
+        '    buildCommand: "bun install"',
+        '    startCommand: "bun run start"',
+        '    healthCheckPath: "/health"',
+        "    envVars:",
+        "      - key: BUN_VERSION",
+        '        value: "1.1.0"',
+        "      - key: PORT",
+        '        value: "4002"',
+      ].join("\n"),
+    );
+    expect(yaml).toContain(
+      [
+        '    name: "locked"',
+        "    runtime: node",
+        '    rootDir: "services/locked"',
+        '    buildCommand: "bun install"',
+        '    startCommand: "bun run start"',
+        '    healthCheckPath: "/health"',
+        "    envVars:",
+        "      - key: BUN_VERSION",
+        '        value: "1.3"',
+        "      - key: PORT",
+        '        value: "4003"',
+      ].join("\n"),
+    );
+  });
+
   it("exports frontend without start script as static site with dist publish path", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "flisk-export-static-"));
     writeFiles(root, {
