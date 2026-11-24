@@ -7,7 +7,7 @@
  * The one value written is the service port, which is not a secret.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { Resource } from "./discover.js";
 import { ExportError } from "./errors.js";
 
@@ -131,10 +131,11 @@ function readPackageJson(dir: string): PackageJson | null {
   };
 }
 
-function dockerfileOf(resource: Resource): string | null {
-  const declared = resource.config.dockerfile;
-  const file = join(resource.path, typeof declared === "string" ? declared : "Dockerfile");
-  return existsSync(file) ? file : null;
+function dockerBuildOf(resource: Resource): { context: string; dockerfile: string } | null {
+  const { buildContext, dockerfile: declared } = resource.config;
+  const context = resolve(resource.path, typeof buildContext === "string" ? buildContext : ".");
+  const dockerfile = resolve(context, typeof declared === "string" ? declared : "Dockerfile");
+  return existsSync(dockerfile) ? { context, dockerfile } : null;
 }
 
 /** The prebuilt image in service.json, when it names one as a string. */
@@ -220,16 +221,16 @@ function extractBunVersion(pkg: PackageJson): string | null {
 function renderService(repoRoot: string, resource: Resource): string[] {
   assertExportable(resource);
   const lines = ["  - type: web", `    name: ${quote(deployName(resource.name))}`];
-  const dockerfile = dockerfileOf(resource);
+  const docker = dockerBuildOf(resource);
   const pkg = readPackageJson(resource.path);
   const image = imageOf(resource);
   let bunVersion: string | null = null;
   let isStatic = false;
-  if (dockerfile) {
+  if (docker) {
     lines.push(
       "    runtime: docker",
-      `    dockerfilePath: ${quote(repoPath(repoRoot, dockerfile))}`,
-      `    dockerContext: ${quote(repoPath(repoRoot, resource.path))}`,
+      `    dockerfilePath: ${quote(repoPath(repoRoot, docker.dockerfile))}`,
+      `    dockerContext: ${quote(repoPath(repoRoot, docker.context))}`,
     );
   } else if (pkg) {
     const hasBuild = typeof pkg.scripts.build === "string";
@@ -340,7 +341,7 @@ export function assertWorkerShaped(resource: Resource): void {
     "Pass --allow-non-worker if it really is a Worker",
     "Use `flisk export render` for a Docker or Node service",
   ];
-  if (dockerfileOf(resource)) {
+  if (dockerBuildOf(resource)) {
     throw new ExportError(
       `Resource "${resource.name}" has a Dockerfile, so it does not run as a Cloudflare Worker`,
       hints,
