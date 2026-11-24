@@ -208,6 +208,28 @@ describe("flisk-export render", () => {
     expect(fs.existsSync(path.join(root, "render.yaml"))).toBe(false);
   });
 
+  it("exports the build context and Dockerfile of an imported Compose service", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flisk-export-"));
+    writeFiles(root, {
+      ".flisk/project.json": "{}",
+      "services/app/api/service.json": service({
+        appName: "api",
+        appType: "bring-your-own",
+        buildContext: "../../../app",
+        dockerfile: "docker/api.Dockerfile",
+      }),
+      "app/docker/api.Dockerfile": "FROM node:22\nCOPY package.json .\n",
+      "app/package.json": "{}",
+    });
+
+    const result = await run(["render", "--resource", "api", "--dry-run"], root);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("runtime: docker");
+    expect(result.stdout).toContain('dockerfilePath: "./app/docker/api.Dockerfile"');
+    expect(result.stdout).toContain('dockerContext: "./app"');
+  });
+
   it("exports one resource into --out", async () => {
     const root = exportProject();
     const out = path.join(root, "deploy");
